@@ -1,0 +1,10 @@
+.ssh/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+target/
+.git/
+.idea/
+*.iml
+backlog/
