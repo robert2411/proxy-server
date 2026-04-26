@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 21:49'
+updated_date: '2026-04-26 21:54'
 labels: []
 milestone: m-1
 dependencies:
@@ -135,6 +135,18 @@ All 11 tests passing. Re-submitting for QA.
 - AC/DoD: Complete
 - Security: No new issues found
 - Verification: mvn test -Dtest="PortForwardCacheTest,ProxyHandlerTest" (pass, 29/29)
+
+✅ Milestone M2 complete. All tasks implemented and QA approved. Awaiting Security and Documentation routing by Manager.
+
+✅ SECURITY APPROVED — static audit complete, zero vulnerabilities identified
+- Files reviewed: PortForwardCache.java, PortForwardConfig.java, PortForwardCacheTest.java
+- Checks: OWASP Top 10, SSRF, path traversal, resource exhaustion, input validation, ReDoS
+- Notes: ServerSocket binds loopback-only (InetAddress.getLoopbackAddress()), executor bounded at 16 threads, ConcurrentHashMap.compute() ensures thread-safe cache ops, ServerSocket leak fixed with try-catch, no hardcoded secrets, no user-controlled input reaches unsafe sinks without SSH session manager gatekeeping
+
+✅ DOCUMENTATION COMPLETE
+- Updated: backlog/docs/doc-2 - SSH-Subsystem-Architecture.md (added PortForwardCache and PortForwardConfig component sections, updated test strategy, added decision cross-reference)
+- Updated: backlog/docs/doc-3 - SSH-Session-Resilience-Pattern.md (changed PortForwardCache reference from future tense to present tense, added PortForwardCache to key files table)
+- Created: backlog/decisions/decision-4 - Loopback-only-binding-and-localhost-remote-host-for-port-forwarding.md (documents loopback-only ServerSocket binding and localhost remote host choices with topology rationale)
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -22,10 +22,11 @@ Reference for the project's core technology choices and dependency versions.
 
 ## Test
 
-| Artifact | Purpose |
-|----------|---------|
-| spring-boot-starter-test | JUnit 5, MockMvc, assertions |
-| io.projectreactor:reactor-test | Reactive stream testing utilities |
+| Artifact | Version | Purpose |
+|----------|---------|---------|
+| spring-boot-starter-test | (managed) | JUnit 5, MockMvc, assertions |
+| io.projectreactor:reactor-test | (managed) | Reactive stream testing utilities |
+| com.squareup.okhttp3:mockwebserver | 4.12.0 | HTTP mock server for proxy handler tests |
 
 ## Build
 

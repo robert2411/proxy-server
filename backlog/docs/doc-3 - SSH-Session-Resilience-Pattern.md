@@ -49,7 +49,7 @@ public interface PortForwardEvictionListener {
 
 - SshSessionManager holds a `volatile` reference (nullable)
 - Registration via `setEvictionListener(PortForwardEvictionListener listener)`
-- TASK-4's `PortForwardCache` will implement this interface and register on startup
+- `PortForwardCache` implements this interface and registers itself via `@PostConstruct` on startup (TASK-4)
 - Listener exceptions are caught and logged (cannot crash the health check)
 
 ## Key Files
@@ -58,6 +58,7 @@ public interface PortForwardEvictionListener {
 |------|------|
 | `SshSessionManager.java` | Session cache, keepalive, reconnect, health check |
 | `PortForwardEvictionListener.java` | Eviction callback interface |
+| `PortForwardCache.java` | Implements eviction listener; invalidates all forwards for evicted host |
 | `SshSessionManagerKeepaliveTest.java` | 8 tests covering all resilience layers |
 
 ## Design Constraints

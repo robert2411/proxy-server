@@ -38,6 +38,34 @@ Spring `@Component` that manages the lifecycle of SSH sessions. Key behaviors:
 - **Host key verification:** Uses `loadKnownHosts()` from `~/.ssh/known_hosts`. Fails closed if known_hosts is missing/unreadable (throws IOException).
 - **Conditional activation:** `@ConditionalOnProperty(name = "ssh.enabled", havingValue = "true", matchIfMissing = true)` allows disabling in test profiles.
 
+### PortForwardCache
+
+**File:** `src/main/java/com/github/robert2411/proxy/PortForwardCache.java`
+
+Spring `@Component` implementing `PortForwardEvictionListener`. Lazily creates SSH local port forwards per target host:port pair. Key behaviors:
+
+- **Cache storage:** `ConcurrentHashMap<String, ForwardEntry>` keyed by `targetHost + ":" + targetPort`
+- **Per-key locking:** Uses `ConcurrentHashMap.compute()` (same pattern as SshSessionManager) for thread-safe lazy creation
+- **Loopback-only binding:** `ServerSocket(0, 0, InetAddress.getLoopbackAddress())` — ephemeral port on loopback interface only (security: no external exposure)
+- **Localhost remote host:** Port forwarding Parameters use `"localhost"` as remote destination because the SSH session terminates on the target machine (1:1 SSH-to-target topology)
+- **Dead forwarder detection:** Checks `Future.isDone()` on each access — if the forwarder thread exited, closes the stale ServerSocket and recreates
+- **Resource cleanup:** `try-catch` in `createForwardEntry()` closes ServerSocket on forwarder creation failure; `@PreDestroy` closes all entries on shutdown
+- **Eviction integration:** Implements `PortForwardEvictionListener.onSessionEvicted()` — invalidates all cached forwards for the evicted host. Registers itself via `@PostConstruct`
+
+API:
+- `localPortFor(String targetHost, int targetPort)` → returns stable loopback port number
+- `invalidate(String targetHost, int targetPort)` → removes cached forward, closes resources
+- `onSessionEvicted(String canonicalHost)` → cascading invalidation for all forwards to that host
+
+### PortForwardConfig
+
+**File:** `src/main/java/com/github/robert2411/proxy/PortForwardConfig.java`
+
+Spring `@Configuration` providing a bounded `ExecutorService` bean for forwarder listener threads:
+- Fixed pool of 16 daemon threads (named `"port-fwd-"`)
+- Injected into PortForwardCache for `forwarder.listen(serverSocket)` submission
+- Bounded to prevent unbounded thread growth from many forwarded targets
+
 ## Connection Flow
 
 ```
@@ -63,6 +91,7 @@ clientFor(targetHost)
 
 - **SshConfigParserTest** (11 tests): Parsing, wildcard matching, directive merging, case-insensitive keywords, error handling
 - **SshSessionManagerTest** (9 tests): Cache behavior, stale eviction, missing config error, concurrent access, conditional property
+- **PortForwardCacheTest** (11 tests): Stable port return, cache reuse, invalidation, executor injection, dead forwarder replacement, session eviction cascading, ServerSocket cleanup on creation failure
 
 ## Configuration
 
@@ -74,4 +103,5 @@ clientFor(targetHost)
 ## Related
 
 - [Decision: Custom SshConfigParser over sshj OpenSSHConfig](../decisions/decision-1%20-%20Custom-SshConfigParser-over-sshj-OpenSSHConfig.md)
+- [Decision: Loopback-only binding and localhost remote host for port forwarding](../decisions/decision-4%20-%20Loopback-only-binding-and-localhost-remote-host-for-port-forwarding.md)
 - Handoff doc (doc-1) — original architecture discussion

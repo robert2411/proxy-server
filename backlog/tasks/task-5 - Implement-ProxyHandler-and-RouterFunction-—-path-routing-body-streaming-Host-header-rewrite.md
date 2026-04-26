@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 21:49'
+updated_date: '2026-04-26 21:55'
 labels: []
 milestone: m-1
 dependencies:
@@ -187,6 +187,31 @@ All 18 tests passing. Re-submitting for QA.
 - AC/DoD: Complete
 - Security: No new issues found
 - Verification: mvn test -Dtest="PortForwardCacheTest,ProxyHandlerTest" (pass, 29/29)
+
+✅ Milestone M2 complete. All tasks implemented and QA approved. Awaiting Security and Documentation routing by Manager.
+
+✅ SECURITY APPROVED — static audit complete, zero vulnerabilities identified
+- Files reviewed: ProxyHandler.java, ProxyRouterConfig.java, ProxyHandlerTest.java, pom.xml
+- Checks: OWASP Top 10, SSRF, path traversal, host header injection, request smuggling, open redirect, resource exhaustion, input validation, hop-by-hop headers, ReDoS
+- Notes:
+  • SSRF mitigated: upstream connections go only to 127.0.0.1 (loopback) via SSH port forwards; host param gated by SshSessionManager (SSH config aliases only)
+  • Port validated 1-65535 with 400 on failure (line 60-68)
+  • Hop-by-hop headers stripped inbound and outbound per RFC 2616 (line 33-36, 99, 115)
+  • Error messages sanitized — no internal details leaked (lines 77, 126)
+  • Streaming via toEntityFlux(DataBuffer.class) — no full-body memory buffering
+  • Raw path extraction preserves URL-encoding without double-decode (line 81-82)
+  • Host header set to user-controlled host:port (line 104) — acceptable since Spring/Netty reject control chars at transport layer and value is single path segment (no slashes/CRLF)
+  • maxInMemorySize(-1) on WebClient codecs is acceptable given streaming design (body never buffered as single unit)
+  • No regex patterns — zero ReDoS risk
+  • No authentication layer present — noted as architectural deferral, not a vulnerability introduced by this task
+
+✅ DOCUMENTATION COMPLETE
+- Created: backlog/docs/doc-5 - Proxy-Subsystem-Architecture.md (new architecture doc for proxy subsystem: ProxyHandler, ProxyRouterConfig, dual route patterns, streaming, hop-by-hop filtering, security posture, test strategy)
+- Updated: backlog/docs/doc-4 - Tech-Stack-and-Dependencies.md (added mockwebserver 4.12.0 test dependency)
+- No new decision record needed: architectural choices (streaming, dual routes, raw path extraction) are implementation details of the existing WebFlux+sshj decision (decision-3)
+
+Squash dry-run output:
+Nothing to squash.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
