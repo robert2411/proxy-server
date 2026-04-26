@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 21:54'
+updated_date: '2026-04-26 21:56'
 labels: []
 milestone: m-1
 dependencies:
@@ -147,6 +147,11 @@ All 11 tests passing. Re-submitting for QA.
 - Updated: backlog/docs/doc-2 - SSH-Subsystem-Architecture.md (added PortForwardCache and PortForwardConfig component sections, updated test strategy, added decision cross-reference)
 - Updated: backlog/docs/doc-3 - SSH-Session-Resilience-Pattern.md (changed PortForwardCache reference from future tense to present tense, added PortForwardCache to key files table)
 - Created: backlog/decisions/decision-4 - Loopback-only-binding-and-localhost-remote-host-for-port-forwarding.md (documents loopback-only ServerSocket binding and localhost remote host choices with topology rationale)
+
+Squash dry-run output:
+Nothing to squash.
+
+✅ COMMIT COMPLETE: task-4: Implement PortForwardCache — lazy ephemeral local port forward per target host:port
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
