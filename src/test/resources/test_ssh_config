@@ -1,0 +1,25 @@
+Host bastion
+    HostName bastion.example.com
+    User admin
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519
+
+Host app-server
+    HostName 10.0.1.50
+    User deploy
+    Port 2222
+    ProxyJump bastion
+    IdentityFile ~/.ssh/id_ed25519
+
+Host deep-server
+    HostName 10.0.2.100
+    User root
+    Port 22
+    ProxyJump bastion,app-server
+    IdentityFile ~/.ssh/id_rsa
+
+Host direct-host
+    HostName direct.example.com
+    User ubuntu
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
