@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "wiki": {
+      "type": "stdio",
+      "command": "/Users/robertstevens/IdeaProjects/wikiMcp/wiki-mcp",
+      "args": [],
+      "env": {
+        "WIKI_MCP_WIKI_PATH": "/Users/robertstevens/Projects/wiki"
+      }
+    }
+  }
+}
