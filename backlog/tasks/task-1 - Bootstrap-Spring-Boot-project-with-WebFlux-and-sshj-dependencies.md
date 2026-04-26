@@ -1,11 +1,11 @@
 ---
 id: TASK-1
 title: Bootstrap Spring Boot project with WebFlux and sshj dependencies
-status: In Progress
+status: Done
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:26'
-updated_date: '2026-04-26 21:25'
+updated_date: '2026-04-26 21:27'
 labels: []
 milestone: m-0
 dependencies: []
@@ -93,6 +93,11 @@ Implementation complete. Ready for QA.
 ✅ DOCUMENTATION COMPLETE
 - Created: backlog/docs/doc-4 - Tech-Stack-and-Dependencies.md (reference for project dependencies, versions, config, and entry point)
 - Created: backlog/decisions/decision-3 - Spring-Boot-WebFlux-with-sshj-for-SSH-aware-HTTP-proxy.md (architectural decision: Option B single-process SSH-aware proxy over Option A separate concerns)
+
+Squash dry-run output:
+Nothing to squash.
+
+✅ COMMIT COMPLETE: task-1: Bootstrap Spring Boot project with WebFlux and sshj dependencies
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

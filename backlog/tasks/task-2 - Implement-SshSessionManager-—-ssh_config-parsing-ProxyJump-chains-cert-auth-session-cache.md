@@ -3,11 +3,11 @@ id: TASK-2
 title: >-
   Implement SshSessionManager — ssh_config parsing, ProxyJump chains, cert auth,
   session cache
-status: In Progress
+status: Done
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:26'
-updated_date: '2026-04-26 21:26'
+updated_date: '2026-04-26 21:27'
 labels: []
 milestone: m-0
 dependencies: []

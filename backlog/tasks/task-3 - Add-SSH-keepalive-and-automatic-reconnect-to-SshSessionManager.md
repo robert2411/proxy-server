@@ -1,11 +1,11 @@
 ---
 id: TASK-3
 title: Add SSH keepalive and automatic reconnect to SshSessionManager
-status: In Progress
+status: Done
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:26'
-updated_date: '2026-04-26 21:26'
+updated_date: '2026-04-26 21:27'
 labels: []
 milestone: m-0
 dependencies:
