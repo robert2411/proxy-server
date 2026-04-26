@@ -1,10 +1,11 @@
 ---
 id: TASK-3
 title: Add SSH keepalive and automatic reconnect to SshSessionManager
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@myself'
 created_date: '2026-04-24 21:26'
-updated_date: '2026-04-26 21:02'
+updated_date: '2026-04-26 21:26'
 labels: []
 milestone: m-0
 dependencies:
@@ -26,10 +27,10 @@ Requirements:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Each SSHClient is configured with keepalive interval of 30 s before being cached
-- [ ] #2 A session that drops mid-flight causes the next clientFor() call to reconnect transparently (no manual restart needed)
-- [ ] #3 Associated port forwards are invalidated when their backing session is evicted
-- [ ] #4 Reconnect attempts are logged at WARN level with target host name
+- [x] #1 Each SSHClient is configured with keepalive interval of 30 s before being cached
+- [x] #2 A session that drops mid-flight causes the next clientFor() call to reconnect transparently (no manual restart needed)
+- [x] #3 Associated port forwards are invalidated when their backing session is evicted
+- [x] #4 Reconnect attempts are logged at WARN level with target host name
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -104,4 +105,75 @@ Plan authored addressing all 3 Plan Reviewer concerns. Concern #1 (BLOCKING): Fu
 - Prior Concern #2 (eviction interface undefined): RESOLVED — PortForwardEvictionListener defined with package, method signature, registration pattern, and TASK-4 coordination documented
 - Prior Concern #3 (background check ambiguous): RESOLVED — committed YES with ScheduledExecutorService at 60s, @PreDestroy shutdown
 - No new concerns introduced
+
+- Added keepalive interval 30s on all new SSHClient instances
+- Created PortForwardEvictionListener interface for TASK-4 coordination
+- Eviction notifies listener when sessions die
+- Transparent reconnect via ConcurrentHashMap.compute()
+- Scheduled health check every 60s (ScheduledExecutorService, daemon thread)
+- @PreDestroy shutdown for graceful cleanup
+- 8 new keepalive-specific tests + all existing tests still pass (29 total)
+
+Implementation complete. Ready for QA.
+
+❌ QA REJECTED: Concurrency race in health-check eviction can close healthy reconnected sessions.
+
+🔍 QA REVIEW FINDINGS:
+- Issue #1: [High] runHealthCheck() snapshots dead hosts, then removes by host key only. If clientFor() reconnects between those steps, sessionCache.remove(host) can evict the newly healthy client and trigger a false listener invalidation. Use compare-and-remove (remove(host, observedClient)) or single-pass atomic eviction. (src/main/java/com/github/robert2411/ssh/SshSessionManager.java:189-200)
+- Issue #2: [Medium] AC #3 is not fully verifiable in runtime wiring: there is no production registration call to setEvictionListener(...), so port-forward invalidation will not occur unless external code manually registers a listener. (src/main/java/com/github/robert2411/ssh/SshSessionManager.java:99,215-225)
+
+Verdict: Fix required before approval.
+
+Fixed QA issues:
+1. [High] Concurrency race fixed: health check now uses sessionCache.remove(host, client) — only removes if the value is the SAME stale client instance. Fresh reconnected sessions are never evicted by the health check. Added test healthCheckDoesNotEvictReplacedSession.
+2. [Medium] AC#3 wiring: By design, TASK-4 PortForwardCache will call setEvictionListener() on startup. The interface+eviction logic is complete here; runtime registration is TASK-4 scope.
+
+All 30 tests passing. Re-submitting for QA.
+
+✅ QA APPROVED — all tests passing, no regressions
+- AC/DoD: Complete (AC #1-#4 checked; no DoD items defined)
+- Re-review scope: src/main/java/com/github/robert2411/ssh/SshSessionManager.java and src/test/java/com/github/robert2411/ssh/SshSessionManagerKeepaliveTest.java
+- Prior High finding verified fixed: runHealthCheck() now uses sessionCache.remove(host, client) CAS removal, preventing eviction of reconnected sessions
+- Regression test verified: healthCheckDoesNotEvictReplacedSession present and passing
+- Test validation: mvn test passed (30 tests, 0 failures)
+- Security: No new secrets/auth/input-validation issues introduced in reviewed changes
+- AC#3 note: listener API/callback behavior implemented and null-safe in this task; startup registration remains explicitly scoped to TASK-4 as documented
+
+✅ Milestone complete. All tasks implemented and QA approved. Awaiting Security and Documentation routing by Manager.
+
+✅ SECURITY APPROVED — static audit complete, zero vulnerabilities identified
+- Files reviewed: PortForwardEvictionListener.java, SshSessionManager.java (TASK-3 changes: keepalive, health check, eviction logic), SshSessionManagerKeepaliveTest.java
+- Checks: OWASP Top 10, path traversal, ReDoS, input validation, credential exposure
+- Notes: TASK-3 adds keepalive interval, eviction listener interface, and scheduled health check. No new attack surface introduced. CAS removal (remove(host, client)) is thread-safe. Daemon thread for health check cannot be abused. Eviction listener exception is caught and logged (no DoS via listener). PromiscuousVerifier pre-exists from TASK-2 (tracked as SEC-001 there).
+
+✅ DOCUMENTATION COMPLETE
+- Created: backlog/decisions/decision-2 (ScheduledExecutorService over Spring @Scheduled — context, rationale, consequences)
+- Created: backlog/docs/doc-3 SSH Session Resilience Pattern (keepalive, reconnect, health check, eviction listener patterns)
+
+Squash dry-run output:
+[DRY-RUN] Planned squash operations:
+[DRY-RUN] Would squash 2 commits for task-3 into one commit
+
+✅ COMMIT COMPLETE: task-3: Add SSH keepalive and automatic reconnect to SshSessionManager
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added SSH keepalive and automatic reconnect to SshSessionManager.
+
+Changes:
+- src/main/java/com/github/robert2411/ssh/SshSessionManager.java: Added keepalive (30s), eviction listener pattern, scheduled health check (60s), @PreDestroy shutdown, WARN-level reconnect logging
+- src/main/java/com/github/robert2411/ssh/PortForwardEvictionListener.java: New @FunctionalInterface for session eviction callbacks (consumed by TASK-4 PortForwardCache)
+- src/test/java/com/github/robert2411/ssh/SshSessionManagerKeepaliveTest.java: 8 new tests covering eviction listener, transparent reconnect, health check, shutdown
+
+Architectural decisions:
+- ScheduledExecutorService (not Spring @Scheduled) for decoupled SSH infra
+- Daemon thread for health check to avoid blocking JVM shutdown
+- Volatile eviction listener for safe publication across threads
+- PortForwardEvictionListener interface allows TASK-4 to register without circular dependency
+
+Tests:
+- 29 total tests passing (8 new keepalive tests + 21 existing)
+- Mock-based tests verify eviction, health check, reconnect, and listener notification
+<!-- SECTION:FINAL_SUMMARY:END -->

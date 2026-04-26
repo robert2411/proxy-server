@@ -1,9 +1,10 @@
 package com.github.robert2411.ssh;
 
+import jakarta.annotation.PreDestroy;
 import net.schmizz.sshj.SSHClient;
 import net.schmizz.sshj.DefaultConfig;
 import net.schmizz.sshj.connection.channel.direct.DirectConnection;
-import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
+
 import net.schmizz.sshj.userauth.keyprovider.KeyProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,20 +18,35 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Core SSH lifecycle component. Reads ~/.ssh/config via custom parser,
  * resolves ProxyJump hops recursively, handles certificate auth, and maintains
  * a ConcurrentHashMap cache of live SSHClient sessions keyed by target host.
+ *
+ * <p>Features:
+ * <ul>
+ *   <li>Keepalive: 30s interval on all sessions to prevent NAT timeout</li>
+ *   <li>Automatic reconnect: stale sessions are transparently replaced</li>
+ *   <li>Eviction listener: notifies PortForwardCache when sessions die</li>
+ *   <li>Background health check: proactively evicts dead sessions every 60s</li>
+ * </ul>
  */
 @Component
 @ConditionalOnProperty(name = "ssh.enabled", havingValue = "true", matchIfMissing = true)
 public class SshSessionManager {
 
     private static final Logger log = LoggerFactory.getLogger(SshSessionManager.class);
+    private static final int KEEPALIVE_INTERVAL_SECONDS = 30;
+    private static final int HEALTH_CHECK_INTERVAL_SECONDS = 60;
 
     private final SshConfigParser sshConfig;
     private final ConcurrentHashMap<String, SSHClient> sessionCache = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService healthCheckExecutor;
+    private volatile PortForwardEvictionListener evictionListener;
 
     public SshSessionManager() {
         this(new File(System.getProperty("user.home"), ".ssh/config"));
@@ -53,19 +69,39 @@ public class SshSessionManager {
             throw new BeanCreationException("SshSessionManager",
                     "Failed to parse SSH config: " + e.getMessage(), e);
         }
+        this.healthCheckExecutor = startHealthCheck();
     }
 
     /**
      * Package-private constructor for testing with pre-parsed config.
      */
     SshSessionManager(SshConfigParser config) {
+        this(config, true);
+    }
+
+    /**
+     * Package-private constructor for testing — allows disabling health check.
+     */
+    SshSessionManager(SshConfigParser config, boolean enableHealthCheck) {
         this.sshConfig = config;
+        this.healthCheckExecutor = enableHealthCheck ? startHealthCheck() : null;
         log.info("SshSessionManager initialized with provided config");
     }
 
     /**
+     * Register an eviction listener to be notified when sessions are evicted.
+     * Used by PortForwardCache (TASK-4) to invalidate associated port forwards.
+     *
+     * @param listener the listener to register (null to unregister)
+     */
+    public void setEvictionListener(PortForwardEvictionListener listener) {
+        this.evictionListener = listener;
+    }
+
+    /**
      * Returns a connected and authenticated SSHClient for the given target host.
-     * Uses the session cache for efficiency; stale sessions are evicted automatically.
+     * Uses the session cache for efficiency; stale sessions are evicted and
+     * reconnected transparently.
      *
      * @param targetHost the SSH host alias or hostname as defined in ssh_config
      * @return a connected and authenticated SSHClient
@@ -78,12 +114,12 @@ public class SshSessionManager {
                     return existing;
                 }
                 if (existing != null) {
-                    log.warn("Evicting stale session for {}", key);
-                    closeQuietly(existing);
+                    evictSession(key, existing);
                 }
                 try {
                     return buildClient(key);
                 } catch (IOException e) {
+                    log.warn("Reconnect to {} failed: {}", key, e.getMessage());
                     throw new CompletionException(e);
                 }
             });
@@ -96,13 +132,12 @@ public class SshSessionManager {
     }
 
     /**
-     * Evicts a session from the cache (used by keepalive/reconnect logic).
+     * Evicts a session from the cache (public API for external eviction triggers).
      */
     public void evict(String targetHost) {
         SSHClient removed = sessionCache.remove(targetHost);
         if (removed != null) {
-            log.info("Evicted session for {}", targetHost);
-            closeQuietly(removed);
+            evictSession(targetHost, removed);
         }
     }
 
@@ -120,9 +155,78 @@ public class SshSessionManager {
         return sessionCache.keySet();
     }
 
+    @PreDestroy
+    void shutdown() {
+        if (healthCheckExecutor != null) {
+            healthCheckExecutor.shutdownNow();
+            log.info("SSH session health check executor shut down");
+        }
+        // Close all cached sessions
+        sessionCache.forEach((host, client) -> closeQuietly(client));
+        sessionCache.clear();
+    }
+
+    // --- Private methods ---
+
+    private ScheduledExecutorService startHealthCheck() {
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "ssh-health-check");
+            t.setDaemon(true);
+            return t;
+        });
+        executor.scheduleAtFixedRate(this::runHealthCheck,
+                HEALTH_CHECK_INTERVAL_SECONDS, HEALTH_CHECK_INTERVAL_SECONDS, TimeUnit.SECONDS);
+        log.info("SSH session health check scheduled every {}s", HEALTH_CHECK_INTERVAL_SECONDS);
+        return executor;
+    }
+
+    /**
+     * Background health check: iterates all cached sessions and evicts dead ones.
+     * Uses remove(key, value) to avoid race with concurrent reconnects.
+     */
+    void runHealthCheck() {
+        int evicted = 0;
+        for (Map.Entry<String, SSHClient> entry : sessionCache.entrySet()) {
+            String host = entry.getKey();
+            SSHClient client = entry.getValue();
+            if (!client.isConnected() || !client.isAuthenticated()) {
+                // Only remove if the value is still the same stale client
+                // (prevents evicting a freshly reconnected session)
+                if (sessionCache.remove(host, client)) {
+                    evictSession(host, client);
+                    evicted++;
+                }
+            }
+        }
+
+        if (evicted > 0) {
+            log.info("Health check: evicted {} dead sessions", evicted);
+        }
+    }
+
+    /**
+     * Evict a session with notification to the eviction listener.
+     */
+    private void evictSession(String canonicalHost, SSHClient staleClient) {
+        log.warn("Evicting dead session for {}", canonicalHost);
+        closeQuietly(staleClient);
+
+        PortForwardEvictionListener listener = this.evictionListener;
+        if (listener != null) {
+            try {
+                listener.onSessionEvicted(canonicalHost);
+                log.warn("Evicted session for {} — notified port-forward listener", canonicalHost);
+            } catch (Exception e) {
+                log.error("Eviction listener threw exception for {}: {}", canonicalHost, e.getMessage());
+            }
+        } else {
+            log.warn("Evicted session for {} — no port-forward listener registered", canonicalHost);
+        }
+    }
+
     private SSHClient buildClient(String targetHost) throws IOException {
         SSHClient client = new SSHClient(new DefaultConfig());
-        client.addHostKeyVerifier(new PromiscuousVerifier()); // TODO: use KnownHosts in production
+        loadKnownHosts(client);
 
         // Resolve config entry
         Map<String, String> config = sshConfig.getConfig(targetHost);
@@ -139,6 +243,9 @@ public class SshSessionManager {
             resolveProxyJump(proxyJump, client, hostname, port);
         }
 
+        // Enable keepalive — sends SSH_MSG_IGNORE every 30s to keep NAT mappings alive
+        client.getConnection().getKeepAlive().setKeepAliveInterval(KEEPALIVE_INTERVAL_SECONDS);
+
         // Authenticate with identity file (auto-picks up -cert.pub if present)
         String identityFile = config.get("IdentityFile");
         if (identityFile != null) {
@@ -150,7 +257,8 @@ public class SshSessionManager {
             client.authPublickey(user);
         }
 
-        log.info("Connected to {} ({}:{}) as {}", targetHost, hostname, port, user);
+        log.info("Connected to {} ({}:{}) as {} [keepalive={}s]",
+                targetHost, hostname, port, user, KEEPALIVE_INTERVAL_SECONDS);
         return client;
     }
 
@@ -171,7 +279,7 @@ public class SshSessionManager {
 
             // Create a direct connection through the current jump host
             SSHClient nextClient = new SSHClient(new DefaultConfig());
-            nextClient.addHostKeyVerifier(new PromiscuousVerifier());
+            loadKnownHosts(nextClient);
             DirectConnection dc = jumpClient.newDirectConnection(hopHost, hopPort);
             nextClient.connectVia(dc);
 
@@ -191,6 +299,25 @@ public class SshSessionManager {
         // Final hop: connect the target client through the last jump host
         DirectConnection finalConnection = jumpClient.newDirectConnection(finalHost, finalPort);
         targetClient.connectVia(finalConnection);
+    }
+
+    /**
+     * Loads SSH known hosts from ~/.ssh/known_hosts for host key verification.
+     * If the file is missing or unreadable, logs a warning and throws IOException
+     * to fail the connection rather than silently accepting unknown keys.
+     */
+    private void loadKnownHosts(SSHClient client) throws IOException {
+        File knownHostsFile = new File(System.getProperty("user.home"), ".ssh/known_hosts");
+        try {
+            client.loadKnownHosts(knownHostsFile);
+        } catch (IOException e) {
+            log.warn("Cannot load SSH known_hosts from {}: {}. " +
+                    "Connection will be refused — add the target host key to known_hosts first.",
+                    knownHostsFile.getAbsolutePath(), e.getMessage());
+            throw new IOException("SSH host key verification failed: unable to load known_hosts from " +
+                    knownHostsFile.getAbsolutePath() + ". Ensure the file exists and the target host " +
+                    "key is present. Details: " + e.getMessage(), e);
+        }
     }
 
     private void closeQuietly(SSHClient client) {

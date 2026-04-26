@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:26'
-updated_date: '2026-04-26 21:13'
+updated_date: '2026-04-26 21:25'
 labels: []
 milestone: m-0
 dependencies: []
@@ -154,6 +154,27 @@ All 21 tests passing. Re-submitting for QA.
   - Added parser test parseHandlesCaseInsensitiveKeywords passes (SshConfigParserTest.java:149)
   - Full test suite passes: 21 passed, 0 failed (mvn test)
 - Security: PromiscuousVerifier remains an explicitly documented dev-phase TODO; defer hardening to dedicated security task.
+
+⚠️ SECURITY FINDINGS:
+- SEC-001 [high] src/main/java/com/github/robert2411/ssh/SshSessionManager.java:229,282 — MITM via PromiscuousVerifier: All SSH connections accept any host key without verification. An attacker on the network path can impersonate any SSH server, intercept credentials, and read/modify forwarded traffic. Fix: Replace PromiscuousVerifier with KnownHosts verification (client.loadKnownHosts() or custom fingerprint store). Acknowledged as dev-phase TODO — must be resolved before any production/staging deployment.
+
+Files reviewed: SshConfigParser.java, SshSessionManager.java, SshConfigParserTest.java, SshSessionManagerTest.java, test_ssh_config, application-test.yml
+Checks: OWASP Top 10, path traversal, ReDoS, input validation, credential exposure, insecure defaults
+Additional notes:
+- IdentityFile ~ expansion (line 252) reads from local trusted ssh_config — not network-exploitable
+- Wildcard regex in SshConfigParser:132 uses .* but input is from local config file only — no ReDoS risk from external actors
+- No hardcoded secrets found
+- No command injection vectors (no exec/ProcessBuilder calls)
+
+SEC-001 fixed: Replaced PromiscuousVerifier with loadKnownHosts(). Added loadKnownHosts() helper that loads ~/.ssh/known_hosts with proper error handling — logs WARN and throws IOException with informative message if file missing/unreadable. All 30 tests passing.
+
+✅ QA re-approved after SEC-001 fix. Tests passing.
+
+✅ SECURITY RE-AUDIT: SEC-001 resolved — PromiscuousVerifier fully removed (zero references in src/). loadKnownHosts() enforced on all SSHClient creation paths (buildClient line 229, resolveProxyJump line 282). Error handling fails closed: missing/unreadable known_hosts throws IOException, refusing connection. No new vulnerabilities introduced.
+
+✅ DOCUMENTATION COMPLETE
+- Created: backlog/docs/doc-2 - SSH-Subsystem-Architecture.md (full subsystem reference: components, connection flow, thread safety, test strategy, configuration)
+- Created: backlog/decisions/decision-1 - Custom-SshConfigParser-over-sshj-OpenSSHConfig.md (architectural decision: sshj 0.40.0 lacks OpenSSHConfig, custom parser chosen over adding dependencies)
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
