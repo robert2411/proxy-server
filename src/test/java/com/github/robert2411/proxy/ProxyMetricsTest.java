@@ -102,4 +102,23 @@ class ProxyMetricsTest {
     void registryAccessor_returnsInjectedRegistry() {
         assertThat(proxyMetrics.registry()).isSameAs(registry);
     }
+
+    @Test
+    void recordRequest_capsTargetCardinalityAtMaxTags() {
+        // Record requests for MAX_TARGET_TAGS distinct targets — all should register
+        for (int i = 0; i < ProxyMetrics.MAX_TARGET_TAGS; i++) {
+            proxyMetrics.recordRequest("host-" + i, 200);
+        }
+        long distinctBefore = registry.find("proxy.requests.total").counters().stream()
+                .map(c -> c.getId().getTag("target"))
+                .distinct().count();
+        assertThat(distinctBefore).isEqualTo(ProxyMetrics.MAX_TARGET_TAGS);
+
+        // One more distinct target should be denied by the MeterFilter
+        proxyMetrics.recordRequest("overflow-host", 200);
+        long distinctAfter = registry.find("proxy.requests.total").counters().stream()
+                .map(c -> c.getId().getTag("target"))
+                .distinct().count();
+        assertThat(distinctAfter).isEqualTo(ProxyMetrics.MAX_TARGET_TAGS);
+    }
 }

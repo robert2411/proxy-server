@@ -35,7 +35,7 @@ SSH keys and config **must be mounted read-only** at runtime — they are never
 baked into the image.
 
 ```bash
-docker run -v ~/.ssh:/root/.ssh:ro -p 8080:8080 proxy-server
+docker run -v ~/.ssh:/home/app/.ssh:ro -p 8080:8080 proxy-server
 ```
 
 ### Docker Compose

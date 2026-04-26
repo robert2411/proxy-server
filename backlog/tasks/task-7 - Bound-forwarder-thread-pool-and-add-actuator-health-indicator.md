@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 22:12'
+updated_date: '2026-04-26 22:39'
 labels: []
 milestone: m-2
 dependencies:
@@ -147,6 +147,23 @@ All 21 tests still pass. Re-submitting for QA.
 - Code quality: Good
 - Security: No issues
 - Spelling: Clean
+
+✅ SECURITY APPROVED — static audit complete, zero vulnerabilities identified
+- Files reviewed: PortForwardConfig.java, SshHealthIndicator.java, SshSessionManager.java (sessionStatus), PortForwardCache.java (rejection path), application.yml
+- Checks: OWASP Top 10, path traversal, ReDoS, input validation, information leakage, resource exhaustion
+- Notes: Health show-details=when-authorized prevents info disclosure without Spring Security (details hidden from all unauthenticated callers). Thread pool bounded with SynchronousQueue + fail-fast rejection. sessionStatus() returns Map<String,Boolean> without leaking SSHClient references.
+
+✅ DOCUMENTATION COMPLETE
+- Updated: backlog/docs/doc-2 - SSH-Subsystem-Architecture.md
+  - Added SshHealthIndicator component section (new actuator health endpoint)
+  - Updated SshSessionManager to document sessionStatus() accessor
+  - Updated PortForwardConfig to reflect configurable pool size + SynchronousQueue fail-fast
+  - Updated Configuration section with proxy.ssh.forwarder-threads and show-details properties
+  - Updated Test Strategy with SshHealthIndicatorTest, PortForwardConfigTest, and updated PortForwardCacheTest counts
+- No new decision record required (SynchronousQueue fail-fast and sessionStatus() encapsulation are standard engineering patterns, not architectural trade-offs)
+
+Squash dry-run output:
+Nothing to squash.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

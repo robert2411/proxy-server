@@ -9,6 +9,7 @@ import net.schmizz.sshj.connection.channel.direct.LocalPortForwarder;
 import net.schmizz.sshj.connection.channel.direct.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -28,6 +29,7 @@ import java.util.concurrent.RejectedExecutionException;
  * when SSH sessions are evicted.
  */
 @Component
+@ConditionalOnProperty(name = "ssh.enabled", havingValue = "true", matchIfMissing = true)
 public class PortForwardCache implements PortForwardEvictionListener {
 
     private static final Logger log = LoggerFactory.getLogger(PortForwardCache.class);

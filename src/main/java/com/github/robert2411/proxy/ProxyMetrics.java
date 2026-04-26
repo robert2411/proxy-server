@@ -4,7 +4,9 @@ import com.github.robert2411.ssh.SshSessionManager;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.config.MeterFilter;
 import jakarta.annotation.PostConstruct;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Component;
  * </ul>
  */
 @Component
+@ConditionalOnProperty(name = "ssh.enabled", havingValue = "true", matchIfMissing = true)
 public class ProxyMetrics {
 
     private final MeterRegistry registry;
@@ -26,12 +29,22 @@ public class ProxyMetrics {
     private final PortForwardCache portForwardCache;
     private final Timer upstreamLatencyTimer;
 
+    /** Maximum number of distinct 'target' tag values before new values are denied. */
+    static final int MAX_TARGET_TAGS = 128;
+
     public ProxyMetrics(MeterRegistry registry,
                         SshSessionManager sshSessionManager,
                         PortForwardCache portForwardCache) {
         this.registry = registry;
         this.sshSessionManager = sshSessionManager;
         this.portForwardCache = portForwardCache;
+
+        // SEC-001: Cap cardinality of the 'target' tag to prevent unbounded memory
+        // growth from attacker-controlled hostnames sprayed via URL path variables.
+        registry.config().meterFilter(
+                MeterFilter.maximumAllowableTags(
+                        "proxy.requests.total", "target", MAX_TARGET_TAGS, MeterFilter.deny()));
+
         this.upstreamLatencyTimer = Timer.builder("proxy.upstream.latency.seconds")
                 .description("Latency from proxy to upstream first response byte")
                 .publishPercentileHistogram(true)

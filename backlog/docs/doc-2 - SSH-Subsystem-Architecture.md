@@ -37,6 +37,18 @@ Spring `@Component` that manages the lifecycle of SSH sessions. Key behaviors:
 - **Certificate auth:** Uses sshj `loadKeys(identityFilePath)` which automatically picks up `-cert.pub` companion files.
 - **Host key verification:** Uses `loadKnownHosts()` from `~/.ssh/known_hosts`. Fails closed if known_hosts is missing/unreadable (throws IOException).
 - **Conditional activation:** `@ConditionalOnProperty(name = "ssh.enabled", havingValue = "true", matchIfMissing = true)` allows disabling in test profiles.
+- **Session status accessor:** `sessionStatus()` returns `Map<String, Boolean>` — per-host connection status (`isConnected && isAuthenticated`) without leaking raw `SSHClient` references. Used by `SshHealthIndicator` (TASK-7).
+
+### SshHealthIndicator
+
+**File:** `src/main/java/com/github/robert2411/ssh/SshHealthIndicator.java`
+
+Spring `@Component` extending `AbstractHealthIndicator` that exposes SSH session connectivity at `/actuator/health`. Key behaviors:
+
+- **Per-host status:** Calls `SshSessionManager.sessionStatus()` and reports each host as UP or DOWN (disconnected/unauthenticated)
+- **Aggregate health:** Reports UP if all cached sessions are healthy (or none cached); DOWN if any session is dead
+- **Detail visibility:** Controlled by `management.endpoint.health.show-details: when-authorized` — details hidden from unauthenticated callers (TASK-7 security fix)
+- **Bean naming:** Registered as `sshProxy` health component in Spring Boot actuator (bean name minus "HealthIndicator" suffix)
 
 ### PortForwardCache
 
@@ -62,9 +74,11 @@ API:
 **File:** `src/main/java/com/github/robert2411/proxy/PortForwardConfig.java`
 
 Spring `@Configuration` providing a bounded `ExecutorService` bean for forwarder listener threads:
-- Fixed pool of 16 daemon threads (named `"port-fwd-"`)
+- Pool size configurable via `proxy.ssh.forwarder-threads` (default: 16), daemon threads named `"port-fwd-"`
+- Uses `ThreadPoolExecutor` with `SynchronousQueue` — fails fast with `RejectedExecutionException` when all threads are busy (no queuing)
+- `PortForwardCache` catches rejection and throws descriptive `IOException` ("pool exhausted"), closing the `ServerSocket` on failure
 - Injected into PortForwardCache for `forwarder.listen(serverSocket)` submission
-- Bounded to prevent unbounded thread growth from many forwarded targets
+- Bounded to prevent unbounded thread growth from many forwarded targets (TASK-7)
 
 ## Connection Flow
 
@@ -91,13 +105,17 @@ clientFor(targetHost)
 
 - **SshConfigParserTest** (11 tests): Parsing, wildcard matching, directive merging, case-insensitive keywords, error handling
 - **SshSessionManagerTest** (9 tests): Cache behavior, stale eviction, missing config error, concurrent access, conditional property
-- **PortForwardCacheTest** (11 tests): Stable port return, cache reuse, invalidation, executor injection, dead forwarder replacement, session eviction cascading, ServerSocket cleanup on creation failure
+- **SshHealthIndicatorTest** (5 tests): Health UP/DOWN states, per-host details, empty cache returns UP
+- **PortForwardCacheTest** (12 tests): Stable port return, cache reuse, invalidation, executor injection, dead forwarder replacement, session eviction cascading, ServerSocket cleanup on creation failure, pool exhaustion handling
+- **PortForwardConfigTest** (4 tests): Configurable pool size, rejection on saturation, daemon thread naming
 
 ## Configuration
 
 - SSH config path: `~/.ssh/config` (hardcoded, follows OpenSSH convention)
 - Known hosts path: `~/.ssh/known_hosts`
 - Spring property: `ssh.enabled=true|false` (default: true)
+- Spring property: `proxy.ssh.forwarder-threads=<int>` (default: 16) — max concurrent port-forward listener threads
+- Actuator: `management.endpoint.health.show-details: when-authorized` — per-host SSH status visible only to authenticated callers
 - Test profile: `application-test.yml` sets `ssh.enabled: false`
 
 ## Related

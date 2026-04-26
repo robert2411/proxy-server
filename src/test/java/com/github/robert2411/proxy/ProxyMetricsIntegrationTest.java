@@ -17,7 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Integration test verifying that all five proxy metrics appear in
  * the /actuator/prometheus endpoint with correct Prometheus exposition format.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "ssh.enabled=true")
 @ActiveProfiles("test")
 class ProxyMetricsIntegrationTest {
 

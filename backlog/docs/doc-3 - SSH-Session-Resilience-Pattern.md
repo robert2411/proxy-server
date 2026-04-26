@@ -61,6 +61,16 @@ public interface PortForwardEvictionListener {
 | `PortForwardCache.java` | Implements eviction listener; invalidates all forwards for evicted host |
 | `SshSessionManagerKeepaliveTest.java` | 8 tests covering all resilience layers |
 
+## Reconnect Metrics Listener (TASK-6)
+
+In addition to the eviction listener, SshSessionManager supports a **reconnect listener** (`BiConsumer<String, SSHClient>`) registered by `ProxyMetrics` via `@PostConstruct`:
+
+- Fires in `clientFor()` when a stale session is detected and replaced
+- Increments `ssh.reconnects.total{target}` counter for Prometheus/Grafana visibility
+- Independent from the eviction listener — both fire on stale session replacement
+
+This provides operational visibility into SSH session instability without coupling the SSH subsystem to the metrics library.
+
 ## Design Constraints
 
 - Health check interval (60s) is hardcoded — suitable for internal proxy with low session count

@@ -2,6 +2,7 @@ package com.github.robert2411.proxy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -24,6 +25,7 @@ import java.util.Set;
  * via PortForwardCache, and streams the request/response through WebClient.
  */
 @Component
+@ConditionalOnProperty(name = "ssh.enabled", havingValue = "true", matchIfMissing = true)
 public class ProxyHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ProxyHandler.class);

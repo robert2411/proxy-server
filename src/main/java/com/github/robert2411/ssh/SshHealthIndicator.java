@@ -1,5 +1,6 @@
 package com.github.robert2411.ssh;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.health.contributor.AbstractHealthIndicator;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.stereotype.Component;
@@ -15,6 +16,7 @@ import java.util.Map;
  * <p>Registers as "sshProxy" in /actuator/health (bean name minus "HealthIndicator" suffix).
  */
 @Component("sshProxy")
+@ConditionalOnProperty(name = "ssh.enabled", havingValue = "true", matchIfMissing = true)
 public class SshHealthIndicator extends AbstractHealthIndicator {
 
     private final SshSessionManager sshSessionManager;

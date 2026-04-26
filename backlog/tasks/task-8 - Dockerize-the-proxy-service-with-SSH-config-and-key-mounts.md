@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 22:25'
+updated_date: '2026-04-26 22:38'
 labels: []
 milestone: m-2
 dependencies:
@@ -171,6 +171,44 @@ All AC/DoD checked. Ready for QA.
 - Security: No SSH keys baked into image; runtime SSH mount is read-only
 - Spelling: Clean
 - Validation: docker compose config parses; actuator exposure confirmed in src/main/resources/application.yml:8-15
+
+✅ Milestone M3 complete. All 3 tasks (TASK-7, TASK-6, TASK-8) implemented and QA approved. Awaiting Security and Documentation routing by Manager.
+
+⚠️ SECURITY FINDINGS:
+- SEC-001 [medium] Dockerfile:25 — Container runs as root: no USER directive in runtime stage. The JVM process runs as UID 0, so any application-level compromise (e.g. RCE via deserialization) grants root inside the container. Fix: add a non-root user in the runtime stage and switch to it:
+    RUN addgroup --system app && adduser --system --ingroup app app
+    COPY --from=build --chown=app:app /app/target/Proxy-server-1.0-SNAPSHOT.jar app.jar
+    USER app
+  Note: SSH mount path must change from /root/.ssh to /home/app/.ssh (update docker-compose.yml volumes accordingly). This is a defence-in-depth hardening — exploitability requires a pre-existing RCE.
+- Files reviewed: Dockerfile, .dockerignore, docker-compose.yml, README.md, application.yml, pom.xml
+- Checks: OWASP Top 10, Docker security (root user, secrets in layers, SSH key exposure), path traversal, input validation
+- Positive notes: .dockerignore correctly excludes SSH keys/certs, multi-stage build avoids JDK/source in final image, SSH mount is read-only, no secrets baked into image layers
+
+SEC-001 fixed: Added non-root user. Container now runs as 'app' user. SSH mount updated to /home/app/.ssh.
+
+❌ QA REJECTION:
+- [High] Cannot re-approve while mvn test is failing in repository validation run.
+- Failing test: com.github.robert2411.ProxyServerApplicationTest.contextLoads
+- Error: NoSuchBeanDefinitionException for com.github.robert2411.ssh.SshSessionManager during Spring context startup.
+- Security fix itself was verified in code: Dockerfile uses addgroup/adduser + USER app + COPY --chown, docker-compose mounts ~/.ssh:/home/app/.ssh:ro, and README docker run example matches /home/app/.ssh:ro.
+
+Fixed contextLoads test failure. All tests passing.
+
+✅ QA re-approved. All 80 tests passing.
+
+✅ SECURITY RE-AUDIT: SEC-001 resolved — Dockerfile runs as non-root user:
+- Line 18: addgroup/adduser creates system user "app"
+- Line 22: COPY --chown=app:app transfers JAR with correct ownership
+- Line 28: USER app directive switches runtime UID
+- docker-compose.yml mounts ~/.ssh:/home/app/.ssh:ro (correct path)
+- .dockerignore excludes .ssh/, *.pem, *.key, id_rsa*, id_ed25519*
+- No SSH keys or secrets baked into image layers
+No new vulnerabilities introduced.
+
+✅ DOCUMENTATION COMPLETE
+- Updated: backlog/docs/doc-4 - Tech-Stack-and-Dependencies.md (added Container/Docker section with image stages, runtime user, ports, mounts, CLI commands)
+- Created: backlog/decisions/decision-5 - Non-root-container-user-for-Docker-runtime.md (SEC-001 fix: defence-in-depth rationale for non-root UID)
+- Created: backlog/decisions/decision-7 - Curl-based-Docker-healthcheck-over-wget-or-native-probes.md (healthcheck tool choice trade-off)
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

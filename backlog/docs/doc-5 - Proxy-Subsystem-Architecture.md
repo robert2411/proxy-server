@@ -41,6 +41,30 @@ The more specific pattern (with `/**`) is registered first. The bare `/{host}/{p
 
 **Why dual patterns:** Spring WebFlux `PathPatternParser` does not match `/{host}/{port}/**` when there is no trailing path segment. Without the second pattern, requests to `/{host}/{port}` would 404.
 
+### ProxyMetrics
+
+**File:** `src/main/java/com/github/robert2411/proxy/ProxyMetrics.java`
+
+Spring `@Component` that centralises all proxy observability metrics. Injected with `MeterRegistry`, `SshSessionManager`, and `PortForwardCache`. Registers five metrics:
+
+| Metric | Type | Tags | Description |
+|--------|------|------|-------------|
+| `proxy.requests.total` | Counter | `target`, `status` | Incremented on every proxied request (success, error, and early 502 paths) |
+| `ssh.sessions.active` | Gauge | — | Bound to `SshSessionManager.cacheSize()`; reflects live SSH session count |
+| `port.forwards.active` | Gauge | — | Bound to `PortForwardCache.size()`; reflects active port forwarder count |
+| `proxy.upstream.latency.seconds` | Timer | — | Histogram with `publishPercentileHistogram(true)` for p50/p95/p99 buckets |
+| `ssh.reconnects.total` | Counter | `target` | Fires via reconnect listener on SshSessionManager stale-session replacement |
+
+**Cardinality protection:** A `MeterFilter.maximumAllowableTags("proxy.requests.total", "target", 128, MeterFilter.deny())` caps the target tag cardinality at 128 to prevent OOM from attacker-controlled hostnames (SEC-001 fix).
+
+**Instrumentation in ProxyHandler:**
+- `Timer.Sample` starts **after** `localPortFor()` returns — measures only HTTP upstream latency, excludes SSH connection/port-forward setup time
+- Timer stopped and request counter recorded in: success `flatMap`, error `onErrorResume`, and early 502 port-forward failure catch block
+
+**Reconnect listener in SshSessionManager:**
+- `BiConsumer<String, SSHClient>` registered via `@PostConstruct`
+- Fires `recordReconnect(host)` when a stale session is replaced in `clientFor()`
+
 ## Request Flow
 
 ```
@@ -69,7 +93,7 @@ Client request: GET /targetHost/8080/api/users?q=test
 
 ## Test Strategy
 
-- **ProxyHandlerTest** (18 tests) using `WebTestClient` + `MockWebServer`:
+- **ProxyHandlerTest** (20 tests) using `WebTestClient` + `MockWebServer`:
   - All HTTP methods: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
   - Path remainder and query string preserved verbatim
   - Host header rewritten correctly
@@ -79,6 +103,16 @@ Client request: GET /targetHost/8080/api/users?q=test
   - Bare route `/{host}/{port}` forwards to `/`
   - Invalid port returns 400 (non-numeric, out of range)
   - Hop-by-hop header stripping verified
+  - Metrics recorded on successful request (counter + timer)
+  - Metrics recorded on port-forward failure (counter with status 502)
+- **ProxyMetricsTest** (7 tests) using `SimpleMeterRegistry`:
+  - All 5 metric registrations verified
+  - Tag correctness for target/status labels
+  - Histogram bucket generation confirmed
+  - Reconnect listener integration
+- **ProxyMetricsIntegrationTest** (`@SpringBootTest`):
+  - `/actuator/prometheus` contains all 5 metric names
+  - `proxy_upstream_latency_seconds_bucket` lines present (validates percentile histogram)
 
 ## Related
 

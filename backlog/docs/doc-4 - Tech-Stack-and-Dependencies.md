@@ -39,6 +39,22 @@ Reference for the project's core technology choices and dependency versions.
 - Server port: **8080**
 - Actuator endpoints exposed: `health`, `prometheus`
 
+## Container (Docker)
+
+| Component | Value | Purpose |
+|-----------|-------|---------|
+| Build stage | `maven:3.9-eclipse-temurin-21` | Compile & package |
+| Runtime stage | `eclipse-temurin:21-jre` | Slim JRE (no JDK) |
+| Runtime user | `app` (non-root) | Defence-in-depth (SEC-001) |
+| Exposed port | 8080 | HTTP proxy + actuator |
+| SSH mount | `/home/app/.ssh` (read-only) | Runtime SSH config & keys |
+| Healthcheck | `curl -sf http://localhost:8080/actuator/health` | Compose liveness probe |
+
+- **Build**: `docker build -t proxy-server .`
+- **Run**: `docker run -v ~/.ssh:/home/app/.ssh:ro -p 8080:8080 proxy-server`
+- **Compose**: `docker compose up`
+- `.dockerignore` excludes `.ssh/`, `*.pem`, `*.key`, `id_rsa*`, `id_ed25519*`, `target/`, `.git/`
+
 ## Entry Point
 
 - `com.github.robert2411.ProxyServerApplication` — `@SpringBootApplication` main class
