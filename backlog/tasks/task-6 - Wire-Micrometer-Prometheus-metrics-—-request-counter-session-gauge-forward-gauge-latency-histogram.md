@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 22:38'
+updated_date: '2026-04-26 22:39'
 labels: []
 milestone: m-2
 dependencies:
@@ -198,6 +198,11 @@ Fixed contextLoads test failure. All tests passing.
 - Updated: backlog/docs/doc-5 - Proxy-Subsystem-Architecture.md (added ProxyMetrics component section, metrics instrumentation details, updated test strategy with new test counts)
 - Updated: backlog/docs/doc-3 - SSH-Session-Resilience-Pattern.md (added Reconnect Metrics Listener section documenting BiConsumer callback)
 - Created: backlog/decisions/decision-6 - MeterFilter-cardinality-cap-for-target-tag.md (SEC-001 architectural decision: cardinality cap at 128 to prevent OOM from attacker-sprayed target tags)
+
+Squash dry-run output:
+Nothing to squash.
+
+✅ COMMIT COMPLETE: task-6: Wire Micrometer/Prometheus metrics — request counter, session gauge, forward gauge, latency histogram
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

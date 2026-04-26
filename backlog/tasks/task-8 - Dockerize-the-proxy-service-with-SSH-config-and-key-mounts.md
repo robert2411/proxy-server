@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 22:38'
+updated_date: '2026-04-26 22:39'
 labels: []
 milestone: m-2
 dependencies:
@@ -209,6 +209,9 @@ No new vulnerabilities introduced.
 - Updated: backlog/docs/doc-4 - Tech-Stack-and-Dependencies.md (added Container/Docker section with image stages, runtime user, ports, mounts, CLI commands)
 - Created: backlog/decisions/decision-5 - Non-root-container-user-for-Docker-runtime.md (SEC-001 fix: defence-in-depth rationale for non-root UID)
 - Created: backlog/decisions/decision-7 - Curl-based-Docker-healthcheck-over-wget-or-native-probes.md (healthcheck tool choice trade-off)
+
+Squash dry-run output:
+Nothing to squash.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
