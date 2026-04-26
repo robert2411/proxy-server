@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:26'
-updated_date: '2026-04-26 21:25'
+updated_date: '2026-04-26 21:26'
 labels: []
 milestone: m-0
 dependencies: []
@@ -175,6 +175,11 @@ SEC-001 fixed: Replaced PromiscuousVerifier with loadKnownHosts(). Added loadKno
 ✅ DOCUMENTATION COMPLETE
 - Created: backlog/docs/doc-2 - SSH-Subsystem-Architecture.md (full subsystem reference: components, connection flow, thread safety, test strategy, configuration)
 - Created: backlog/decisions/decision-1 - Custom-SshConfigParser-over-sshj-OpenSSHConfig.md (architectural decision: sshj 0.40.0 lacks OpenSSHConfig, custom parser chosen over adding dependencies)
+
+Squash dry-run output:
+Nothing to squash.
+
+✅ COMMIT COMPLETE: task-2: Implement SshSessionManager — ssh_config parsing, ProxyJump chains, cert auth, session cache
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
