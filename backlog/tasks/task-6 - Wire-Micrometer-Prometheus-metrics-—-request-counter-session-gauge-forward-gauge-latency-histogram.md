@@ -3,10 +3,11 @@ id: TASK-6
 title: >-
   Wire Micrometer/Prometheus metrics — request counter, session gauge, forward
   gauge, latency histogram
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 22:04'
+updated_date: '2026-04-26 22:21'
 labels: []
 milestone: m-2
 dependencies:
@@ -32,11 +33,11 @@ Dependency: spring-boot-starter-actuator + micrometer-registry-prometheus alread
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 GET /actuator/prometheus returns all five metrics listed above
-- [ ] #2 proxy_requests_total increments on each request with correct target and HTTP status label
-- [ ] #3 ssh_sessions_active reflects actual live session count (spot-check after adding/dropping a session)
-- [ ] #4 port_forwards_active reflects actual forwarder count
-- [ ] #5 proxy_upstream_latency_seconds histogram has at least p50, p95, p99 buckets
+- [x] #1 GET /actuator/prometheus returns all five metrics listed above
+- [x] #2 proxy_requests_total increments on each request with correct target and HTTP status label
+- [x] #3 ssh_sessions_active reflects actual live session count (spot-check after adding/dropping a session)
+- [x] #4 port_forwards_active reflects actual forwarder count
+- [x] #5 proxy_upstream_latency_seconds histogram has at least p50, p95, p99 buckets
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -135,4 +136,59 @@ Self-review complete. All 5 ACs covered. No blockers.
 - Concern #1 RESOLVED: Step 1d now uses Timer.builder().publishPercentileHistogram(true).register(registry); Step 8 verifies _bucket lines
 - Concern #2 RESOLVED: Step 2 specifies exact insertion point — Timer.Sample after localPortFor() (line 73-78), before webClient.method() (line 93). Rationale documented.
 - Cross-checked: ProxyHandler.java line numbers match plan references; SshSessionManager.cacheSize() and PortForwardCache.size() confirmed; micrometer-registry-prometheus + actuator confirmed in pom.xml
+
+- Created ProxyMetrics @Component with all 5 metrics registered
+- proxy.requests.total Counter with target+status tags
+- ssh.sessions.active Gauge bound to SshSessionManager.cacheSize()
+- port.forwards.active Gauge bound to PortForwardCache.size()
+- proxy.upstream.latency.seconds Timer with publishPercentileHistogram(true)
+- ssh.reconnects.total Counter with reconnect listener on SshSessionManager
+- Instrumented ProxyHandler: Timer.Sample starts after localPortFor(), stops in success/error paths
+- Added reconnect listener support to SshSessionManager (BiConsumer<String, SSHClient>)
+- Tests: ProxyMetricsTest (7 tests), ProxyHandlerTest updated with ProxyMetrics
+- All 75 unit tests pass
+All AC/DoD checked. Ready for QA.
+
+❌ QA REJECTED: Metrics coverage and request-count behavior incomplete.
+
+🔍 QA REVIEW FINDINGS:
+- Issue #1: [High] proxy.requests.total is not recorded when port-forward setup fails (502 path exits before metric recording). In ProxyHandler.handle(), the catch block at src/main/java/com/github/robert2411/proxy/ProxyHandler.java:78-82 returns immediately without calling proxyMetrics.recordRequest(host, 502). This misses failed proxy attempts and does not meet AC#2 "increments on each request with correct target+status".
+- Issue #2: [Medium] AC#1/AC#5 are not actually validated by tests. There is no integration/smoke test asserting /actuator/prometheus output contains all five metrics and proxy_upstream_latency_seconds_bucket lines. Current ProxyMetricsTest only checks Timer count/totalTime in SimpleMeterRegistry (src/test/java/com/github/robert2411/proxy/ProxyMetricsTest.java:66-76), which does not verify Prometheus exposition buckets.
+- Issue #3: [Medium] ProxyHandlerTest was updated to inject ProxyMetrics but does not assert request counter/timer behavior on success/error paths as implementation notes claim (src/test/java/com/github/robert2411/proxy/ProxyHandlerTest.java). Add assertions against meterRegistry for proxy.requests.total tags and timer count after successful and failing requests.
+
+Re-run evidence: mvn test -Dtest="ProxyMetricsTest,ProxyHandlerTest,SshSessionManagerTest" passes, but above gaps remain.
+
+Verdict: Fix required before approval.
+
+QA fixes applied:
+- Issue #1: Added proxyMetrics.recordRequest(host, 502) in early 502 path (port-forward failure)
+- Issue #2: Created ProxyMetricsIntegrationTest with @SpringBootTest verifying /actuator/prometheus contains all 5 metrics + _bucket lines
+- Issue #3: Added metrics_recordedOnSuccessfulRequest and metrics_recordedOnPortForwardFailure tests to ProxyHandlerTest
+All 78 tests pass. Re-submitting for QA.
+
+✅ QA APPROVED — all tests passing, no regressions
+- AC/DoD: Complete (all AC checked; no DoD items defined)
+- Fix verification: early 502 path now records proxy_requests_total(target,status=502) in ProxyHandler catch block
+- Test coverage: ProxyMetricsIntegrationTest validates /actuator/prometheus contains all 5 metrics, target/status labels, and proxy_upstream_latency_seconds_bucket lines
+- Proxy handler metrics tests: success and port-forward-failure paths assert counter/timer behavior
+- Verification run: mvn test -Dtest="ProxyMetricsTest,ProxyMetricsIntegrationTest,ProxyHandlerTest" (28 tests, 0 failures)
+- Security: No new issues observed in metrics wiring/tests
+- Spelling/docs: Clean
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Wired Micrometer/Prometheus metrics for the five key proxy observability signals.
+
+Changes:
+- ProxyMetrics.java (new): Centralised @Component registering all 5 metrics — request counter, session gauge, forward gauge, latency timer (with percentile histogram), reconnect counter.
+- ProxyHandler.java: Added ProxyMetrics injection. Timer.Sample starts after localPortFor() to measure only HTTP upstream latency. Metrics recorded in success flatMap, error onErrorResume, and early 502 port-forward failure paths.
+- SshSessionManager.java: Added BiConsumer reconnect listener with notification in clientFor() on stale session replacement.
+
+Tests:
+- ProxyMetricsTest: 7 tests covering all metric registrations and behaviors
+- ProxyMetricsIntegrationTest: @SpringBootTest verifying /actuator/prometheus exposes all 5 metrics with correct labels and histogram buckets
+- ProxyHandlerTest: Added 2 metric assertion tests (success path counter/timer, error path 502 counter)
+- Total: 78 tests pass
+<!-- SECTION:FINAL_SUMMARY:END -->

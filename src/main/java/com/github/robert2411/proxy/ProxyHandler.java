@@ -10,6 +10,7 @@ import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
+import io.micrometer.core.instrument.Timer;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -37,9 +38,12 @@ public class ProxyHandler {
 
     private final PortForwardCache portForwardCache;
     private final WebClient webClient;
+    private final ProxyMetrics proxyMetrics;
 
-    public ProxyHandler(PortForwardCache portForwardCache, WebClient.Builder webClientBuilder) {
+    public ProxyHandler(PortForwardCache portForwardCache, WebClient.Builder webClientBuilder,
+                        ProxyMetrics proxyMetrics) {
         this.portForwardCache = portForwardCache;
+        this.proxyMetrics = proxyMetrics;
         this.webClient = webClientBuilder
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(-1))
                 .defaultStatusHandler(status -> true, response -> Mono.empty())
@@ -73,9 +77,13 @@ public class ProxyHandler {
             localPort = portForwardCache.localPortFor(host, targetPort);
         } catch (IOException e) {
             log.warn("Failed to establish port forward for {}:{}: {}", host, targetPort, e.getMessage());
+            proxyMetrics.recordRequest(host, 502);
             return ServerResponse.status(502)
                     .bodyValue("Bad Gateway: unable to establish connection to upstream");
         }
+
+        // Start latency timer AFTER localPortFor (measures only HTTP upstream round-trip)
+        Timer.Sample sample = Timer.start(proxyMetrics.registry());
 
         // Build upstream URI from raw path (avoids double-decoding URL-encoded slashes)
         String rawPath = request.uri().getRawPath();
@@ -107,6 +115,10 @@ public class ProxyHandler {
                 .retrieve()
                 .toEntityFlux(DataBuffer.class)
                 .flatMap(entity -> {
+                    // Record metrics on success
+                    sample.stop(proxyMetrics.upstreamLatencyTimer());
+                    proxyMetrics.recordRequest(host, entity.getStatusCode().value());
+
                     ServerResponse.BodyBuilder responseBuilder = ServerResponse
                             .status(entity.getStatusCode());
 
@@ -121,6 +133,10 @@ public class ProxyHandler {
                     return responseBuilder.body(BodyInserters.fromDataBuffers(responseBody));
                 })
                 .onErrorResume(ex -> {
+                    // Record metrics on error
+                    sample.stop(proxyMetrics.upstreamLatencyTimer());
+                    proxyMetrics.recordRequest(host, 502);
+
                     log.warn("Proxy request to {} failed: {}", upstreamUri, ex.getMessage());
                     return ServerResponse.status(502)
                             .bodyValue("Bad Gateway: upstream connection failed");

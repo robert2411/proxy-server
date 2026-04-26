@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
 /**
  * Core SSH lifecycle component. Reads ~/.ssh/config via custom parser,
@@ -47,6 +48,7 @@ public class SshSessionManager {
     private final ConcurrentHashMap<String, SSHClient> sessionCache = new ConcurrentHashMap<>();
     private final ScheduledExecutorService healthCheckExecutor;
     private volatile PortForwardEvictionListener evictionListener;
+    private volatile BiConsumer<String, SSHClient> reconnectListener;
 
     public SshSessionManager() {
         this(new File(System.getProperty("user.home"), ".ssh/config"));
@@ -99,6 +101,16 @@ public class SshSessionManager {
     }
 
     /**
+     * Register a reconnect listener to be notified when a stale session is replaced.
+     * Used by ProxyMetrics to count reconnection events.
+     *
+     * @param listener the listener to register (host, newClient) → called on reconnect
+     */
+    public void setReconnectListener(BiConsumer<String, SSHClient> listener) {
+        this.reconnectListener = listener;
+    }
+
+    /**
      * Returns a connected and authenticated SSHClient for the given target host.
      * Uses the session cache for efficiency; stale sessions are evicted and
      * reconnected transparently.
@@ -113,11 +125,23 @@ public class SshSessionManager {
                 if (existing != null && existing.isConnected() && existing.isAuthenticated()) {
                     return existing;
                 }
-                if (existing != null) {
+                boolean isReconnect = existing != null;
+                if (isReconnect) {
                     evictSession(key, existing);
                 }
                 try {
-                    return buildClient(key);
+                    SSHClient newClient = buildClient(key);
+                    if (isReconnect) {
+                        BiConsumer<String, SSHClient> listener = this.reconnectListener;
+                        if (listener != null) {
+                            try {
+                                listener.accept(key, newClient);
+                            } catch (Exception ex) {
+                                log.debug("Reconnect listener threw exception for {}: {}", key, ex.getMessage());
+                            }
+                        }
+                    }
+                    return newClient;
                 } catch (IOException e) {
                     log.warn("Reconnect to {} failed: {}", key, e.getMessage());
                     throw new CompletionException(e);

@@ -3,6 +3,8 @@ package com.github.robert2411.proxy;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,8 @@ class ProxyHandlerTest {
 
     private MockWebServer mockServer;
     private PortForwardCache portForwardCache;
+    private ProxyMetrics proxyMetrics;
+    private SimpleMeterRegistry meterRegistry;
     private WebTestClient webTestClient;
 
     @BeforeEach
@@ -31,7 +35,13 @@ class ProxyHandlerTest {
 
         portForwardCache = mock(PortForwardCache.class);
 
-        ProxyHandler handler = new ProxyHandler(portForwardCache, WebClient.builder());
+        // Create a real ProxyMetrics with SimpleMeterRegistry and mocked dependencies
+        meterRegistry = new SimpleMeterRegistry();
+        com.github.robert2411.ssh.SshSessionManager mockManager =
+                mock(com.github.robert2411.ssh.SshSessionManager.class);
+        proxyMetrics = new ProxyMetrics(meterRegistry, mockManager, portForwardCache);
+
+        ProxyHandler handler = new ProxyHandler(portForwardCache, WebClient.builder(), proxyMetrics);
         ProxyRouterConfig routerConfig = new ProxyRouterConfig();
         RouterFunction<ServerResponse> route = routerConfig.proxyRoute(handler);
 
@@ -345,8 +355,47 @@ class ProxyHandlerTest {
     }
 
     @Test
+    void metrics_recordedOnSuccessfulRequest() throws Exception {
+        when(portForwardCache.localPortFor("metricshost", 8080)).thenReturn(mockServer.getPort());
+        mockServer.enqueue(new MockResponse().setBody("ok").setResponseCode(200));
+
+        webTestClient.get()
+                .uri("/metricshost/8080/api")
+                .exchange()
+                .expectStatus().isOk();
+
+        // Verify request counter was incremented
+        io.micrometer.core.instrument.Counter counter = meterRegistry.find("proxy.requests.total")
+                .tag("target", "metricshost").tag("status", "200").counter();
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isEqualTo(1.0);
+
+        // Verify timer recorded a sample
+        Timer timer = meterRegistry.find("proxy.upstream.latency.seconds").timer();
+        assertThat(timer).isNotNull();
+        assertThat(timer.count()).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void metrics_recordedOnPortForwardFailure() throws Exception {
+        when(portForwardCache.localPortFor("failhost", 8080))
+                .thenThrow(new IOException("Connection refused"));
+
+        webTestClient.get()
+                .uri("/failhost/8080/api")
+                .exchange()
+                .expectStatus().isEqualTo(502);
+
+        // Verify request counter was incremented with 502 status
+        io.micrometer.core.instrument.Counter counter = meterRegistry.find("proxy.requests.total")
+                .tag("target", "failhost").tag("status", "502").counter();
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isEqualTo(1.0);
+    }
+
+    @Test
     void extractPathRemainder_variousInputs() {
-        ProxyHandler handler = new ProxyHandler(portForwardCache, WebClient.builder());
+        ProxyHandler handler = new ProxyHandler(portForwardCache, WebClient.builder(), proxyMetrics);
 
         // Normal path with remainder
         assertThat(handler.extractPathRemainder("/myhost/8080/api/data", "myhost", "8080"))
