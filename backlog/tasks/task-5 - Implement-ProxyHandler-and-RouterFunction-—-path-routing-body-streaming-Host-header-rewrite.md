@@ -3,11 +3,11 @@ id: TASK-5
 title: >-
   Implement ProxyHandler and RouterFunction — path routing, body streaming, Host
   header rewrite
-status: In Progress
+status: Done
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 21:55'
+updated_date: '2026-04-26 21:56'
 labels: []
 milestone: m-1
 dependencies:

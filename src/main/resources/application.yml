@@ -1,8 +1,15 @@
 server:
   port: 8080
 
+proxy:
+  ssh:
+    forwarder-threads: 16
+
 management:
   endpoints:
     web:
       exposure:
         include: health,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized

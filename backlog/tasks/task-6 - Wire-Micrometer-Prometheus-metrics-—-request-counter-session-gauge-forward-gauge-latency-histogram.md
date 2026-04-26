@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-04-24 21:27'
+updated_date: '2026-04-26 22:04'
 labels: []
 milestone: m-2
 dependencies:
@@ -37,3 +38,101 @@ Dependency: spring-boot-starter-actuator + micrometer-registry-prometheus alread
 - [ ] #4 port_forwards_active reflects actual forwarder count
 - [ ] #5 proxy_upstream_latency_seconds histogram has at least p50, p95, p99 buckets
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Create ProxyMetrics @Component in com.github.robert2411.proxy package
+   - File: src/main/java/com/github/robert2411/proxy/ProxyMetrics.java
+   - Inject io.micrometer.core.instrument.MeterRegistry via constructor
+   - Also inject SshSessionManager and PortForwardCache for gauge binding
+   - Register all five metrics as fields:
+     a. Counter proxy_requests_total — expose a helper method recordRequest(String target, int status) that calls Counter.builder("proxy.requests.total").tags("target", target, "status", String.valueOf(status)).register(registry).increment()
+     b. Gauge ssh_sessions_active — bind via registry.gauge("ssh.sessions.active", sshSessionManager, m -> m.cacheSize())
+     c. Gauge port_forwards_active — bind via registry.gauge("port.forwards.active", portForwardCache, c -> c.size())
+     d. Timer proxy_upstream_latency_seconds — MUST use Timer.builder("proxy.upstream.latency.seconds").publishPercentileHistogram(true).register(registry) to generate histogram _bucket lines for p50/p95/p99. A plain registry.timer() only produces _count and _sum which fails AC#5. Store this Timer as a field and expose via getter upstreamLatencyTimer().
+     e. Counter ssh_reconnects_total — expose helper recordReconnect(String target) that calls Counter.builder("ssh.reconnects.total").tag("target", target).register(registry).increment()
+
+2. Inject ProxyMetrics into ProxyHandler and instrument the request path
+   - File: src/main/java/com/github/robert2411/proxy/ProxyHandler.java
+   - Add ProxyMetrics as a constructor parameter alongside existing PortForwardCache and WebClient.Builder
+   - In handle() method, the timer MUST start AFTER localPortFor() returns (line 73) and BEFORE the webClient.method() call (line 93). This is critical because "upstream latency" measures only the HTTP round-trip to the backend, NOT SSH connection/port-forward setup time which happens inside localPortFor().
+   - Concrete insertion point: immediately after line 78 (after the catch block for localPortFor), add: Timer.Sample sample = Timer.start(registry);
+   - In the flatMap callback (line 109) after entity.getStatusCode() is available, stop the timer: sample.stop(proxyMetrics.upstreamLatencyTimer()); and record the request counter: proxyMetrics.recordRequest(host, entity.getStatusCode().value());
+   - In the onErrorResume block (line 123), also stop the timer and record with status 502: sample.stop(proxyMetrics.upstreamLatencyTimer()); proxyMetrics.recordRequest(host, 502);
+   - Note: Timer.Sample captures start time at creation and records duration at stop() — placing start after localPortFor ensures SSH setup time is excluded.
+
+3. Inject ProxyMetrics into SshSessionManager for reconnect counter
+   - Approach: Add a BiConsumer<String, SSHClient> reconnectListener field + setter on SshSessionManager
+   - File: src/main/java/com/github/robert2411/ssh/SshSessionManager.java
+   - Add: private BiConsumer<String, SSHClient> reconnectListener; and public void setReconnectListener(BiConsumer<String, SSHClient> listener)
+   - In clientFor(), when existing session is not null but stale (detected before evictSession+buildClient), call reconnectListener.accept(canonicalHost, newClient) if listener is set
+   - File: src/main/java/com/github/robert2411/proxy/ProxyMetrics.java
+   - In @PostConstruct, register: sshSessionManager.setReconnectListener((host, client) -> recordReconnect(host));
+
+4. Register gauges in ProxyMetrics @PostConstruct
+   - Gauge for ssh_sessions_active: registry.gauge("ssh.sessions.active", sshSessionManager, m -> m.cacheSize())
+   - Gauge for port_forwards_active: registry.gauge("port.forwards.active", portForwardCache, c -> c.size())
+   - These use the existing cacheSize() (SshSessionManager) and size() (PortForwardCache) methods already present in the codebase
+
+5. Verify Prometheus endpoint config
+   - application.yml already exposes health,prometheus on management endpoints — confirmed
+   - micrometer-registry-prometheus already in pom.xml (line 37-39) — confirmed
+   - spring-boot-starter-actuator already in pom.xml (line 42-45) — confirmed
+   - No additional config needed; Spring Boot auto-configures /actuator/prometheus
+
+6. Write unit test: ProxyMetricsTest
+   - File: src/test/java/com/github/robert2411/proxy/ProxyMetricsTest.java
+   - Use SimpleMeterRegistry to verify:
+     a. recordRequest increments proxy_requests_total with correct target and status tags
+     b. Gauge ssh_sessions_active reflects mock SshSessionManager.cacheSize()
+     c. Gauge port_forwards_active reflects mock PortForwardCache.size()
+     d. Timer records latency samples AND has histogram buckets (verify meter type is DistributionSummary-backed)
+     e. recordReconnect increments ssh_reconnects_total with correct target tag
+
+7. Update ProxyHandler test to verify metrics recording
+   - File: src/test/java/com/github/robert2411/proxy/ProxyHandlerTest.java
+   - Add ProxyMetrics mock/stub to constructor
+   - Verify recordRequest is called after a successful proxied request with correct host and status
+   - Verify timer sample is started and stopped
+   - Verify that on error path, metrics are still recorded with status 502
+
+8. Integration smoke test
+   - File: src/test/java/com/github/robert2411/proxy/ProxyMetricsIntegrationTest.java (or add to existing integration test)
+   - @SpringBootTest with WebTestClient
+   - GET /actuator/prometheus should contain all five metric names:
+     proxy_requests_total, ssh_sessions_active, port_forwards_active,
+     proxy_upstream_latency_seconds, ssh_reconnects_total
+   - Specifically verify proxy_upstream_latency_seconds_bucket lines exist (proves publishPercentileHistogram is working)
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Self-review complete. Plan covers all 5 ACs:
+- AC#1: Steps 1-5 wire all metrics + Prometheus endpoint confirmed available
+- AC#2: Step 2 instruments ProxyHandler with target+status tags
+- AC#3: Step 4 binds gauge to SshSessionManager.cacheSize()
+- AC#4: Step 4 binds gauge to PortForwardCache.size()
+- AC#5: Micrometer Timer auto-produces percentile histograms; verify publishPercentileHistogram(true) is set on Timer builder
+No unverified assumptions — cacheSize() and size() methods already exist. MeterRegistry is auto-configured by Spring Boot Actuator.
+Analysis complete. Plan ready. No blockers.
+
+🔍 PLAN REVIEW CONCERNS:
+- Concern #1 (AC#5 at risk): Step 1d says registry.timer("proxy.upstream.latency.seconds") but this creates a plain Timer with no histogram buckets. AC#5 requires p50/p95/p99 percentiles. The plan notes say "verify publishPercentileHistogram(true)" but this is NOT in the actual plan steps. Step 1d MUST use Timer.builder("proxy.upstream.latency.seconds").publishPercentileHistogram(true).register(registry) — without this, Prometheus only gets _count and _sum, no _bucket lines, and AC#5 fails.
+- Concern #2 (Latency timer scope ambiguous): Plan step 2 says "Before the WebClient call in handle(), start a Timer.Sample" but does not specify whether this is before or after the synchronous localPortFor() call. The metric name is "upstream latency" so the timer MUST start AFTER localPortFor() resolves (line 73) and BEFORE the webClient.method() call (line 93). If started before localPortFor(), the timer would include SSH connection/port-forward setup time, distorting the upstream latency measurement. Step 2 needs to explicitly state: "start Timer.Sample after localPortFor() returns, before the WebClient reactive chain."
+
+Verdict: Plan needs two targeted fixes before implementation. All other steps are sound — AC#1-#4 coverage is correct, reconnect callback approach is clean, and test plan is adequate.
+
+Plan revised to address Plan Reviewer concerns:
+- FIXED Concern #1: Step 1d now explicitly requires Timer.builder("proxy.upstream.latency.seconds").publishPercentileHistogram(true).register(registry). Step 8 also verifies _bucket lines in Prometheus output.
+- FIXED Concern #2: Step 2 now specifies exact insertion point — Timer.Sample starts AFTER localPortFor() returns (line 73/78) and BEFORE webClient.method() (line 93). Rationale documented: excludes SSH connection/port-forward setup time from upstream latency measurement.
+Self-review complete. All 5 ACs covered. No blockers.
+
+✅ PLAN APPROVED — plan is complete, all AC covered, no ambiguity
+- Steps verified: 8
+- AC mapped: 5/5
+- Concern #1 RESOLVED: Step 1d now uses Timer.builder().publishPercentileHistogram(true).register(registry); Step 8 verifies _bucket lines
+- Concern #2 RESOLVED: Step 2 specifies exact insertion point — Timer.Sample after localPortFor() (line 73-78), before webClient.method() (line 93). Rationale documented.
+- Cross-checked: ProxyHandler.java line numbers match plan references; SshSessionManager.cacheSize() and PortForwardCache.size() confirmed; micrometer-registry-prometheus + actuator confirmed in pom.xml
+<!-- SECTION:NOTES:END -->

@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Cache for local port forwards. On first request to a (targetHost, targetPort) pair,
@@ -151,6 +152,15 @@ public class PortForwardCache implements PortForwardEvictionListener {
 
             log.info("Created port forward 127.0.0.1:{} -> {}:{} (via SSH)", localPort, targetHost, targetPort);
             return new ForwardEntry(localPort, serverSocket, future, targetHost, targetPort);
+        } catch (RejectedExecutionException e) {
+            // Thread pool is saturated — fail fast with a clear error
+            try {
+                serverSocket.close();
+            } catch (IOException closeEx) {
+                log.debug("Error closing server socket during cleanup: {}", closeEx.getMessage());
+            }
+            throw new IOException("Port forwarder thread pool exhausted. " +
+                    "Increase proxy.ssh.forwarder-threads or reduce active forwards.", e);
         } catch (Exception e) {
             // Close the ServerSocket if forwarder creation or submission fails
             try {

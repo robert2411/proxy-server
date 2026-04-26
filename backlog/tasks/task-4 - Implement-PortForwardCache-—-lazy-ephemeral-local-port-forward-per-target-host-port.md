@@ -3,7 +3,7 @@ id: TASK-4
 title: >-
   Implement PortForwardCache — lazy ephemeral local port forward per target
   host:port
-status: In Progress
+status: Done
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'

@@ -155,6 +155,21 @@ public class SshSessionManager {
         return sessionCache.keySet();
     }
 
+    /**
+     * Returns the status (connected and authenticated) of each cached SSH session.
+     * Used by the health indicator to report per-host status without leaking SSHClient references.
+     *
+     * @return map of host → true if connected and authenticated, false otherwise
+     */
+    public Map<String, Boolean> sessionStatus() {
+        Map<String, Boolean> status = new ConcurrentHashMap<>();
+        for (Map.Entry<String, SSHClient> entry : sessionCache.entrySet()) {
+            SSHClient client = entry.getValue();
+            status.put(entry.getKey(), client.isConnected() && client.isAuthenticated());
+        }
+        return status;
+    }
+
     @PreDestroy
     void shutdown() {
         if (healthCheckExecutor != null) {

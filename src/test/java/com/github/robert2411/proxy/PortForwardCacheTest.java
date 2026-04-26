@@ -10,9 +10,12 @@ import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -235,6 +238,39 @@ class PortForwardCacheTest {
         assertThat(port2).isGreaterThan(0);
         // SSH client was called twice — initial + replacement
         verify(sshSessionManager, times(2)).clientFor("myhost");
+    }
+
+    @Test
+    void localPortFor_throwsIOException_whenPoolExhausted() throws Exception {
+        // Create a pool of size 1 with SynchronousQueue (fail-fast)
+        ExecutorService tinyPool = new ThreadPoolExecutor(
+                1, 1, 0L, TimeUnit.MILLISECONDS,
+                new SynchronousQueue<>(),
+                r -> {
+                    Thread t = new Thread(r, "test-tiny-pool");
+                    t.setDaemon(true);
+                    return t;
+                });
+
+        PortForwardCache tinyCache = new PortForwardCache(sshSessionManager, tinyPool);
+
+        try {
+            // First forwarder uses the only thread (blocks forever via mock)
+            SSHClient mockClient1 = createMockSshClient();
+            when(sshSessionManager.clientFor("host1")).thenReturn(mockClient1);
+            tinyCache.localPortFor("host1", 8080);
+
+            // Second forwarder should fail — pool is exhausted
+            SSHClient mockClient2 = createMockSshClient();
+            when(sshSessionManager.clientFor("host2")).thenReturn(mockClient2);
+
+            assertThatThrownBy(() -> tinyCache.localPortFor("host2", 9090))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("thread pool exhausted");
+        } finally {
+            tinyCache.shutdown();
+            tinyPool.shutdownNow();
+        }
     }
 
     // --- Helpers ---
