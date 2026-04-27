@@ -1,11 +1,11 @@
 ---
 id: TASK-7
 title: Bound forwarder thread pool and add actuator health indicator
-status: In Progress
+status: Done
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 22:39'
+updated_date: '2026-04-26 22:40'
 labels: []
 milestone: m-2
 dependencies:

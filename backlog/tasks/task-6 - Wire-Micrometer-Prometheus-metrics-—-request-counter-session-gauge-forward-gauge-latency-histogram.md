@@ -3,11 +3,11 @@ id: TASK-6
 title: >-
   Wire Micrometer/Prometheus metrics — request counter, session gauge, forward
   gauge, latency histogram
-status: In Progress
+status: Done
 assignee:
   - '@myself'
 created_date: '2026-04-24 21:27'
-updated_date: '2026-04-26 22:39'
+updated_date: '2026-04-26 22:40'
 labels: []
 milestone: m-2
 dependencies:
